@@ -35,27 +35,29 @@ class NetworkGraph:
         self.graph = {}
         self.routerName=routerTable.name
         self.graph[self.routerName]=[]
-        self.neighbors=[]
         for tableLine in routerTable.routeList:
             self.graph[routerTable.name].append(TableLine(tableLine.network,tableLine.interface, tableLine.nextRouter, tableLine.weight))
 
-    def AddNeighbor(self, neighbor):
-        self.neighbors.append(neighbor)
+    def PrintGraph(self):
+        for node in self.graph:
+            print(node)
+            for line in self.graph[node]:
+                print(line.network, line.interface, line.nextRouter, line.weight)
 
     def UpdateNode(self, routerTable):
         if routerTable.name not in self.graph:
             self.graph[routerTable.name] = []
 
         self.graph[routerTable.name].clear()
+
         for tableLine in routerTable.routeList:
             self.graph[routerTable.name].append(TableLine(tableLine.network,tableLine.interface, tableLine.nextRouter, tableLine.weight))
 
     def Dijkstra(self):#retorna a tabela de rotas dessa roteador baseado no grafo da rede
-         # Dijkstra's Algorithm to find the shortest paths from start_network
         start_router=self.routerName
         distances = {start_router: 0}
         previous_nodes = {start_router: None}
-        priority_queue = [(0, start_router)]  # (distance, network)
+        priority_queue = [(0, start_router)] 
 
         while priority_queue:
             current_distance, current_router = heapq.heappop(priority_queue)
@@ -63,7 +65,6 @@ class NetworkGraph:
             if current_distance > distances.get(current_router, float('inf')):
                 continue
 
-            # Update distances for neighbors (next-hop routers)
             for line in self.graph.get(current_router,[]):
                 weight=line.weight
                 nextHop=line.nextRouter
@@ -72,25 +73,23 @@ class NetworkGraph:
                     distances[nextHop] = distance
                     previous_nodes[nextHop] = current_router
                     heapq.heappush(priority_queue, (distance, nextHop))
-        # Reconstruct the route table from the distances and previous nodes
+
         new_router_table = RouterTable(start_router)
         for router, distance in distances.items():
             if router != start_router:
-                # Inicia com o roteador anterior calculado pelo Dijkstra
                 next_hop = router
                 while previous_nodes[next_hop] != start_router:
                     next_hop = previous_nodes[next_hop]
                 print(start_router,next_hop)
                 new_router_table.addRoute(TableLine(NetWork.get(router),Interfaces.get((start_router,next_hop)),next_hop,distance))
-
+        print(distances)
         return new_router_table
 
 class BBLP_TABLE_LINE(Packet):
     name = "BBLP_TABLE_LINE"
     fields_desc = [
-        IPField("destination", "0.0.0.0"),
-        IPField("mask", "255.255.255.0"),
-        IPField("nexthop", "0.0.0.0"),
+        StrFixedLenField("destinationNetwork", "2255.255.255.255", length=15),
+        StrFixedLenField("nextRouter", "Router", length=10),
         StrFixedLenField("interface", "eth0", length=10),
         IntField("weight", 1)
     ]
@@ -98,76 +97,38 @@ class BBLP_TABLE_LINE(Packet):
 class BBLP(Packet):
     name = "BBLP"
     fields_desc = [
-        IPField("origin", "0.0.0.0"),
+        StrFixedLenField("routerName", "Router", length=10),
         IntField("routeCount", 0)
     ]
 
-    def add_route(self, destination, mask, nexthop, interface, weight):
-        route_entry = BBLP_TABLE_LINE(destination=destination, mask=mask, nexthop=nexthop, interface=interface, weight=weight)
+    def __init__(self, originName):
+        Packet.__init__(self)
+        self.routerName=originName
+        self.routeCount=0
+
+    def add_route(self, destinationNetwork, nextRouter, interface, weight):
+        route_entry = BBLP_TABLE_LINE(
+            destinationNetwork=destinationNetwork,
+            nextRouter=nextRouter,
+            interface=interface,
+            weight=weight
+        )
         self.add_payload(route_entry)
         self.routeCount += 1
 
-    def extract_routes(self):
-        routes = []
+    def extract_routes(self): #retorna RouterTable
+        routerTable=RouterTable(self.routerName.decode('utf-8').strip())
         payload = self.payload
-        while payload and isinstance(payload, BBLP_TABLE_LINE):
-            routes.append((payload.destination, payload.mask, payload.nexthop, payload.interface, payload.weight))
-            payload = payload.payload
-        return routes
+        while isinstance(payload, BBLP_TABLE_LINE):
+            routerTable.addRoute(TableLine(
+                payload.destinationNetwork.decode('utf-8').strip(),
+                payload.nextRouter.decode('utf-8').strip(),
+                payload.interface.decode('utf-8').strip(),
+                payload.weight
+            ))
+            payload = payload.payload  # Move to the next layer
 
-TableRoute = {}
-
-bind_layers(BBLP, BBLP_TABLE_LINE)
-
-def get_network_ip(ip_address, subnet_mask):
-
-    network = ipaddress.IPv4Network(f"{ip_address}/{subnet_mask}", strict=False)
-    return str(network.network_address)
-    
-def get_nexthop_for_interface(interface):
-    output = subprocess.check_output(['ip', 'route', 'show'], universal_newlines=True)
-    
-    for line in output.splitlines():
-        parts = line.strip().split()
-        
-        if 'dev' in parts and parts[-2] == interface:
-            nexthop = parts[2]
-            return nexthop
-    return "0.0.0.0"
-
-def get_interfaces_and_ips():
-    global TableRoute
-    output = subprocess.check_output(['ip', 'addr', 'show'], universal_newlines=True)
-    
-    TableRoute = {}
-
-    for line in output.splitlines():
-        if "inet " in line:
-            ip_info = line.strip().split()
-            ip_address = ip_info[1]
-            iface = ip_info[-1]  
-            
-            print(f"ip_info: {ip_info}, ip_address: {ip_address}, iface: {iface}")
-
-            if iface and iface != 'lo':
-
-                network, mask = ip_address.split('/')
-                
-                network_ip = get_network_ip(network, mask)
-                
-                nexthop = get_nexthop_for_interface(iface) 
-
-
-                TableRoute[network_ip] = {
-                    'nexthop': nexthop,  # IP do próximo roteador (nexthop)
-                    'mask': mask,        # Máscara da rede
-                    'interface': iface,  # Nome da interface
-                    'weight': 0          # Peso da rota
-                }
-    
-
-    print(TableRoute)
-    return TableRoute
+        return routerTable
 
 def receive_routes(pkt):
     pkt.show()
@@ -179,6 +140,10 @@ def receive_routes(pkt):
         routes = bblp_pkt.extract_routes()
         for route in routes:
             print(f"Rota recebida: {route}")
+
+#TODO quando a topologia estiver correta criar para cada roteador o networkGraph e corrigir esses metodos de enviar e receber rotas
+# com isso pronto deve ser possivel cada roteador ficar enviando a sua tabela de rotas e receber a dos outros 
+# pra cada tabela recebida atualizar o nó do roteador e calcular dijkstra novamente
 
 def send_routes(node_ip, interface):
     while True:
@@ -229,9 +194,11 @@ def run_router():
     while True:
         time.sleep(1)  
 
-#run_router()
-route1 = TableLine("192.168.1.0","A-B", "RouterB", 1)
-route2 = TableLine("192.168.2.0","B-C", "RouterC", 2)
+
+# A partir daqui é tudo debug e vai ser removido em breve
+
+route1 = TableLine("192.168.1.0","A-B", "RouterB", 1000)
+route2 = TableLine("192.168.2.0","B-C", "RouterC", 2000)
 
 routerA = RouterTable("RouterA")
 routerB = RouterTable("RouterB")
@@ -242,9 +209,39 @@ routerB.addRoute(route2)
 
 networkGraph = NetworkGraph(routerA)
 networkGraph.UpdateNode(routerB)
-networkGraph.AddNeighbor('routerB')
 
-# Run Dijkstra's algorithm from RouterA (192.168.1.0) to find shortest paths
 new_routes = networkGraph.Dijkstra()
 for line in new_routes.routeList:
     print(line.network, line.interface, line.nextRouter, line.weight)
+
+networkGraph.PrintGraph()
+
+newLine = routerB.routeList[0]
+newLine.weight=3333
+routerB.changeLine(routerB.routeList[0],newLine)
+
+print("")
+
+networkGraph.UpdateNode(routerB)
+
+networkGraph.PrintGraph()
+
+
+new_routes = networkGraph.Dijkstra()
+for line in new_routes.routeList:
+    print(line.network, line.interface, line.nextRouter, line.weight)
+
+bblp=BBLP(originName="RouterB")
+bblp.add_route("0202.2020","RouterD","B-D",123)
+bblp.add_route("1222.2525","RouterC","B-C",1000)
+bblp.show()
+
+print("")
+
+networkGraph.UpdateNode(bblp.extract_routes())
+networkGraph.PrintGraph()
+
+new_routes = networkGraph.Dijkstra()
+for line in new_routes.routeList:
+    print(line.network, line.interface, line.nextRouter, line.weight)
+
