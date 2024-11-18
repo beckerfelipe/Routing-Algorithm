@@ -21,12 +21,12 @@ def myNetwork():
 
     info( '*** Add hosts\n')
 
-    h1 = net.addHost('h1', ip='10.1.1.1/24', defaultRoute='via 10.10.1.0')
-    h2 = net.addHost('h2', ip='10.2.2.1/24', defaultRoute='via 10.10.2.0')
-    h3 = net.addHost('h3', ip='10.3.3.1/24', defaultRoute='via 10.10.3.0')
-    h4 = net.addHost('h4', ip='10.4.4.1/24', defaultRoute='via 10.10.4.0')
-    h5 = net.addHost('h5', ip='10.5.5.1/24', defaultRoute='via 10.10.5.0')
-    h6 = net.addHost('h6', ip='10.6.6.1/24', defaultRoute='via 10.10.6.0')
+    h1 = net.addHost('h1', ip='10.1.1.1/24', defaultRoute='via 10.10.1.1')
+    h2 = net.addHost('h2', ip='10.2.2.1/24', defaultRoute='via 10.10.2.1')
+    h3 = net.addHost('h3', ip='10.3.3.1/24', defaultRoute='via 10.10.3.1')
+    h4 = net.addHost('h4', ip='10.4.4.1/24', defaultRoute='via 10.10.4.1')
+    h5 = net.addHost('h5', ip='10.5.5.1/24', defaultRoute='via 10.10.5.1')
+    h6 = net.addHost('h6', ip='10.6.6.1/24', defaultRoute='via 10.10.6.1')
 
     info('*** Add links\n')
 

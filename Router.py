@@ -1,8 +1,89 @@
+import heapq
 from scapy.all import *
 import time
 import threading
 import subprocess
 import ipaddress
+
+NetWork={'RouterA':'192.168.1.0','RouterB':'192.168.1.0', 'RouterC':'192.168.3.0'}
+
+Interfaces={("RouterA","RouterB"):"A-B", ("RouterB","RouterC"):"B-C"}
+
+class TableLine:
+    def __init__(self, network, interface, nextRouter, weight):
+        self.network=network #rede de destino
+        self.interface=interface #interface que liga com o proximo roteador 
+        self.nextRouter=nextRouter
+        self.weight=weight
+    
+
+class RouterTable:
+    def __init__(self, name):
+        self.name=name       #nome do host/roteador atual
+        self.routeList=[]
+
+    def addRoute(self, tableLine):
+        self.routeList.append(tableLine)
+
+    def changeLine(self, old, new):
+        index=self.routeList.index(old)
+        self.routeList[index]=new
+
+
+class NetworkGraph:
+    def __init__(self, routerTable):
+        self.graph = {}
+        self.routerName=routerTable.name
+        self.graph[self.routerName]=[]
+        self.neighbors=[]
+        for tableLine in routerTable.routeList:
+            self.graph[routerTable.name].append(TableLine(tableLine.network,tableLine.interface, tableLine.nextRouter, tableLine.weight))
+
+    def AddNeighbor(self, neighbor):
+        self.neighbors.append(neighbor)
+
+    def UpdateNode(self, routerTable):
+        if routerTable.name not in self.graph:
+            self.graph[routerTable.name] = []
+
+        self.graph[routerTable.name].clear()
+        for tableLine in routerTable.routeList:
+            self.graph[routerTable.name].append(TableLine(tableLine.network,tableLine.interface, tableLine.nextRouter, tableLine.weight))
+
+    def Dijkstra(self):#retorna a tabela de rotas dessa roteador baseado no grafo da rede
+         # Dijkstra's Algorithm to find the shortest paths from start_network
+        start_router=self.routerName
+        distances = {start_router: 0}
+        previous_nodes = {start_router: None}
+        priority_queue = [(0, start_router)]  # (distance, network)
+
+        while priority_queue:
+            current_distance, current_router = heapq.heappop(priority_queue)
+
+            if current_distance > distances.get(current_router, float('inf')):
+                continue
+
+            # Update distances for neighbors (next-hop routers)
+            for line in self.graph.get(current_router,[]):
+                weight=line.weight
+                nextHop=line.nextRouter
+                distance = current_distance + weight
+                if distance < distances.get(nextHop, float('inf')):
+                    distances[nextHop] = distance
+                    previous_nodes[nextHop] = current_router
+                    heapq.heappush(priority_queue, (distance, nextHop))
+        # Reconstruct the route table from the distances and previous nodes
+        new_router_table = RouterTable(start_router)
+        for router, distance in distances.items():
+            if router != start_router:
+                # Inicia com o roteador anterior calculado pelo Dijkstra
+                next_hop = router
+                while previous_nodes[next_hop] != start_router:
+                    next_hop = previous_nodes[next_hop]
+                print(start_router,next_hop)
+                new_router_table.addRoute(TableLine(NetWork.get(router),Interfaces.get((start_router,next_hop)),next_hop,distance))
+
+        return new_router_table
 
 class BBLP_TABLE_LINE(Packet):
     name = "BBLP_TABLE_LINE"
@@ -88,8 +169,6 @@ def get_interfaces_and_ips():
     print(TableRoute)
     return TableRoute
 
-
-
 def receive_routes(pkt):
     pkt.show()
     if pkt.haslayer(BBLP):
@@ -100,7 +179,6 @@ def receive_routes(pkt):
         routes = bblp_pkt.extract_routes()
         for route in routes:
             print(f"Rota recebida: {route}")
-
 
 def send_routes(node_ip, interface):
     while True:
@@ -127,15 +205,12 @@ def send_routes(node_ip, interface):
         
         time.sleep(15) 
 
-
 def start_router(node_ip, interface):
     print(f"Iniciando roteador para {node_ip} na interface {interface}")
     
     threading.Thread(target=send_routes, args=(node_ip, interface), daemon=True).start()
 
     threading.Thread(target=sniff, kwargs={'iface': interface, 'prn': receive_routes}, daemon=True).start()
-
-
 
 def run_router():
 
@@ -154,5 +229,22 @@ def run_router():
     while True:
         time.sleep(1)  
 
-run_router()
+#run_router()
+route1 = TableLine("192.168.1.0","A-B", "RouterB", 1)
+route2 = TableLine("192.168.2.0","B-C", "RouterC", 2)
 
+routerA = RouterTable("RouterA")
+routerB = RouterTable("RouterB")
+
+routerA.addRoute(route1)
+routerB.addRoute(route2)
+
+
+networkGraph = NetworkGraph(routerA)
+networkGraph.UpdateNode(routerB)
+networkGraph.AddNeighbor('routerB')
+
+# Run Dijkstra's algorithm from RouterA (192.168.1.0) to find shortest paths
+new_routes = networkGraph.Dijkstra()
+for line in new_routes.routeList:
+    print(line.network, line.interface, line.nextRouter, line.weight)
