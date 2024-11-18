@@ -4,6 +4,8 @@ from mininet.node import Node
 from mininet.log import setLogLevel, info
 from mininet.cli import CLI
 
+from Router import RouterTable, TableLine
+
 class AdvancedTopo(Topo):
     "dois roteadores com dois hosts"
 
@@ -50,9 +52,6 @@ def run():
     r2 = net.get('r2')
     r2.cmd('ip route add 10.1.1.0/24 via 10.11.11.1')
 
-    for router in [r1, r2]:
-        router.cmd("xterm -hold -e 'python3 Router.py' &")
-    # Habilitar encaminhamento de IP nos roteadores
     for router in ['r1', 'r2']:
         net[router].cmd('sysctl -w net.ipv4.ip_forward=1')
     
