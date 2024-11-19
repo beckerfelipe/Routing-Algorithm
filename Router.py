@@ -7,7 +7,7 @@ import ipaddress
 
 NetWork={'RouterA':'10.1.1.0','RouterB':'10.2.2.0'} # pode ser setado manualmente é igual para todos os roteadores
 
-Interfaces={("RouterA","RouterB"):"r1-eth1", ("RouterB","RouterA"):"r1-eth1",
+Interfaces={("RouterA","RouterB"):"r1-eth1", ("RouterB","RouterA"):"r2-eth1",
             ("hostA-RouterA"):"h1-eth0",("RouterA-hostA"):"r1-eth0",
             ("hostB-RouterB"):"h2-eth0",("RouterB-hostB"):"r2-eth0"
             } #pode ser setado manualmente pois é unica para toda a rede
@@ -112,8 +112,9 @@ class BBLP(Packet):
 
     def __init__(self):
         Packet.__init__(self)
-        self.routerName=networkGraph.routerName
-        self.routeCount=0
+        if networkGraph != None:
+        	self.routerName=networkGraph.routerName
+        	self.routeCount=0
 
     def add_route(self, destinationNetwork, nextRouter, interface, weight):
         route_entry = BBLP_TABLE_LINE(
@@ -176,6 +177,7 @@ def send_routes():
 
 def receive_routes(pkt):
     print("RECEBEU ALGO")
+    print(f"Pacote recebido: {pkt.summary()}")
     if(pkt.haslayer(BBLP)):
         print("recebeu bblp")
         pkt.show()
@@ -187,7 +189,8 @@ def start_router():
     print(RouterNeighbors)
     for router in RouterNeighbors:
         print(f"Iniciando sniff na interface: {RouterNeighbors[router]}")
-        threading.Thread(target=sniff, kwargs={'prn': receive_routes, 'iface':RouterNeighbors[router]}, daemon=True).start()
+        #threading.Thread(target=sniff, kwargs={'prn': receive_routes, 'iface':RouterNeighbors[router]}, daemon=True).start()
+        threading.Thread(target=sniff, kwargs={'prn':lambda pkt: pkt.show(), 'store':0}, daemon=True).start()
 
     print("threads inicializadas")
     while True:
@@ -215,54 +218,5 @@ if __name__ == "__main__":
         initialRouterTable.addRoute(tableLine=tableLine)
 
     run_router(initialRouterTable=initialRouterTable)
-
-# A partir daqui é tudo debug e vai ser removido em breve
-
-'''route1 = TableLine("192.168.1.0","A-B", "RouterB", 1000)
-route2 = TableLine("192.168.2.0","B-C", "RouterC", 2000)
-
-routerA = RouterTable("RouterA")
-routerB = RouterTable("RouterB")
-
-routerA.addRoute(route1)
-routerB.addRoute(route2)
-
-run_router(routerA)
-networkGraph = NetworkGraph(routerA)
-networkGraph.UpdateNode(routerB)
-
-new_routes = networkGraph.Dijkstra()
-for line in new_routes.routeList:
-    print(line.network, line.interface, line.nextRouter, line.weight)
-
-networkGraph.PrintGraph()
-
-newLine = routerB.routeList[0]
-newLine.weight=3333
-routerB.changeLine(routerB.routeList[0],newLine)
-
-print("")
-
-networkGraph.UpdateNode(routerB)
-
-networkGraph.PrintGraph()
-
-
-new_routes = networkGraph.Dijkstra()
-for line in new_routes.routeList:
-    print(line.network, line.interface, line.nextRouter, line.weight)
-
-bblp=BBLP(originName="RouterB")
-bblp.add_route("0202.2020","RouterD","B-D",123)
-bblp.add_route("1222.2525","RouterC","B-C",1000)
-bblp.show()
-
-print("")
-
-networkGraph.UpdateNode(bblp.extract_routes())
-networkGraph.PrintGraph()
-
-new_routes = networkGraph.Dijkstra()
-for line in new_routes.routeList:
-    print(line.network, line.interface, line.nextRouter, line.weight)'''
+  
 
