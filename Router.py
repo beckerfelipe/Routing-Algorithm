@@ -57,7 +57,7 @@ class NetworkGraph:
         for node in self.graph:
             print(node)
             for line in self.graph[node]:
-                print(line.network, line.interface, line.nextRouter, line.weight)
+                print(line.network, line.nextRouter, tableLine.interface, line.weight)
 
     def UpdateNode(self, routerTable):
         if routerTable.name not in self.graph:
@@ -67,7 +67,7 @@ class NetworkGraph:
 
         for tableLine in routerTable.routeList:
             self.graph[routerTable.name].append(TableLine(
-                tableLine.network, tableLine.interface, tableLine.nextRouter, tableLine.weight))
+                tableLine.network, tableLine.nextRouter, tableLine.interface, tableLine.weight))
 
     def Dijkstra(self):  # retorna a tabela de rotas desse roteador baseado no grafo da rede
         start_router = self.routerName
@@ -215,17 +215,43 @@ def receive_routes(pkt):
         print("Raw packet received. Attempting to parse into BBLP...")
         bblp_packet = parse_raw_to_bblp(pkt)
         if bblp_packet:
-            bblp_packet.show()
-            print("Successfully parsed Raw packet into BBLP!")
             networkGraph.UpdateNode(bblp_packet.extract_routes())
             networkGraph.Dijkstra()
 
+            # AQUI O SEXO DEFINE SE VOU PULAR A PRIMEIRA LINHA
+            # DO GRAFO OU NAO, A PRIMEIRA APARENTEMENTE SEMPRE DA INVALID GATEWAY
+            # A SEGUNDA NAO, MAS NAO ENTENDO TAMBEM, TA ERRADO O JEITO
+            # Q TA SENDO ESCRITO
+            # SE SEXO FOR MAIOR Q 1 ELE IGNORA A PRIMEIRA
+
+            sexo = 0
             # Atualiza as rotas no Mininet com base na tabela de rotas atualizada
             for line in networkGraph.graph[networkGraph.routerName]:
-                destination_network = line.network
-                gateway_ip = NetWork.get(line.nextRouter)  # Gateway é o próximo roteador
-                interface = line.interface
-                
+                sexo += 1
+                if(sexo>1):
+                        
+                    try:
+                        destination_network = line.network
+                        gateway_ip = NetWork.get(line.nextRouter)  # Gateway é o próximo roteador
+                        interface = line.interface
+                        if not gateway_ip:
+                            print(f"Error: Gateway IP {gateway_ip} for {line.interface} not found in NetWork.")
+                            continue
+
+                        # Build the command
+                        cmd = [
+                            "ip", "route", "replace",
+                            destination_network,
+                            "via", gateway_ip,
+                            "dev", interface
+                        ]
+
+                        # Execute the command
+                        subprocess.run(cmd, check=True)
+                        print(f"Route to {destination_network} via {gateway_ip} on {interface} updated successfully.")
+
+                    except Exception as e:
+                        print(f"Error updating route for {line.network}: {e}")  
         else:
             print("Failed to parse Raw packet into BBLP.")
     else:

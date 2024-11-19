@@ -3,8 +3,9 @@ from mininet.net import Mininet
 from mininet.node import Node
 from mininet.log import setLogLevel, info
 from mininet.cli import CLI
+from scapy.all import *
 
-from Router import RouterTable, TableLine
+from Router import IP, BBLP, BBLP_PROTOCOL_NUMBER, BBLP_TABLE_LINE
 
 class AdvancedTopo(Topo):
     "dois roteadores com dois hosts"
@@ -59,8 +60,11 @@ def run():
     CLI(net)
     net.stop()
 
-
 if __name__ == '__main__':
     setLogLevel('info')
+
+
+    bind_layers(IP, BBLP, proto=BBLP_PROTOCOL_NUMBER)
+    bind_layers(BBLP, BBLP_TABLE_LINE)
     run()
 
