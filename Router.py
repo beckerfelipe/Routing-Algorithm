@@ -110,9 +110,9 @@ class BBLP(Packet):
         IntField("routeCount", 0)
     ]
 
-    def __init__(self, originName):
+    def __init__(self):
         Packet.__init__(self)
-        self.routerName=originName
+        self.routerName=networkGraph.routerName
         self.routeCount=0
 
     def add_route(self, destinationNetwork, nextRouter, interface, weight):
@@ -138,6 +138,8 @@ class BBLP(Packet):
             payload = payload.payload  # Move to the next layer
 
         return routerTable
+        
+bind_layers(IP,BBLP)
 
 #TODO quando a topologia estiver correta criar para cada roteador o networkGraph e corrigir esses metodos de enviar e receber rotas
 # com isso pronto deve ser possivel cada roteador ficar enviando a sua tabela de rotas e receber a dos outros 
@@ -145,30 +147,47 @@ class BBLP(Packet):
 
 def send_routes():
     while True:
-        # Cria o pacote BBLP com a origem e contador de rotas inicializado
-        print(networkGraph.routerName)
-        bblp_pkt = BBLP(originName=networkGraph.routerName)
-        for line in networkGraph.graph[networkGraph.routerName]:
-            bblp_pkt.add_route(destinationNetwork=line.network, nextRouter=line.nextRouter, interface=line.interface, weight=line.weight)
-        print("////////////////////////////////////////")
-        for router in RouterNeighbors:
-            #ip_packet = IP(dst=NetWork[router]) / bblp_pkt
-            #send(ip_packet, iface=RouterNeighbors[router])
-            print(f"Anunciando rotas de {networkGraph.routerName} para {router} na interface {RouterNeighbors[router]}")
-        print("\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\")
-        
-        time.sleep(15) 
+        try:
+            # Validação do nome do roteador antes de criar o pacote
+            print(f"Router Name: {networkGraph.routerName}")
+            if not networkGraph.routerName:
+                raise ValueError("O nome do roteador (routerName) não está definido.")
+
+            # Criação do pacote BBLP com o nome de origem
+            bblp_pkt = BBLP()
+            
+            for line in networkGraph.graph[networkGraph.routerName]:
+                bblp_pkt.add_route(
+                    destinationNetwork=line.network,
+                    nextRouter=line.nextRouter,
+                    interface=line.interface,
+                    weight=line.weight
+                )
+
+            # Envio para vizinhos
+            for router in RouterNeighbors:
+                ip_packet = IP(dst=NetWork[router]) / bblp_pkt
+                send(ip_packet, iface=RouterNeighbors[router])
+                print(f"Anunciando rotas de {networkGraph.routerName} para {router} na interface {RouterNeighbors[router]}")
+
+        except Exception as e:
+            print(f"Erro no envio de rotas: {e}")
+       	time.sleep(15)
 
 def receive_routes(pkt):
+    print("RECEBEU ALGO")
     if(pkt.haslayer(BBLP)):
+        print("recebeu bblp")
+        pkt.show()
         bblp=pkt.getLayer(BBLP)
         networkGraph.UpdateNode(bblp.extract_routes())
 
 def start_router():    
     threading.Thread(target=send_routes, daemon=True).start()
-
-    for interface in RouterNeighbors:
-        threading.Thread(target=sniff, kwargs={'iface': interface, 'prn': receive_routes}, daemon=True).start()
+    print(RouterNeighbors)
+    for router in RouterNeighbors:
+        print(f"Iniciando sniff na interface: {RouterNeighbors[router]}")
+        threading.Thread(target=sniff, kwargs={'prn': receive_routes, 'iface':RouterNeighbors[router]}, daemon=True).start()
 
     print("threads inicializadas")
     while True:
