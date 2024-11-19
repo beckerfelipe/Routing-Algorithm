@@ -193,9 +193,10 @@ def parse_raw_to_bblp(raw_packet):
             # Adicione a entrada à tabela de rotas no pacote BBLP
             bblp_packet.add_route(dest_network, next_router, iface, weight)
             offset += 39
-
         print("Pacote BBLP reconstruído:")
         bblp_packet.show()  # Exibe o pacote para debug
+        print("")
+        print("")
         return bblp_packet
 
     except Exception as e:
@@ -206,18 +207,17 @@ def parse_raw_to_bblp(raw_packet):
 
 
 def receive_routes(pkt):
-    pkt.show()
-    if pkt.haslayer(BBLP):
-        print("Received a BBLP packet!")
-        pkt[BBLP].show()
-        networkGraph.UpdateNode(pkt[BBLP].extract_routes())
-    elif pkt.haslayer(Raw):
+    if pkt.haslayer(Raw):
         print("Raw packet received. Attempting to parse into BBLP...")
         bblp_packet = parse_raw_to_bblp(pkt)
         if bblp_packet:
+            if bblp_packet.routerName.decode('utf-8').strip()== networkGraph.routerName:
+                print(f"Ignorando pacote enviado pelo próprio roteador: {bblp_packet.routerName.decode('utf-8').strip()}")
+                return
+
             networkGraph.UpdateNode(bblp_packet.extract_routes())
             networkGraph.Dijkstra()
-
+		
             # AQUI O SEXO DEFINE SE VOU PULAR A PRIMEIRA LINHA
             # DO GRAFO OU NAO, A PRIMEIRA APARENTEMENTE SEMPRE DA INVALID GATEWAY
             # A SEGUNDA NAO, MAS NAO ENTENDO TAMBEM, TA ERRADO O JEITO
@@ -262,7 +262,6 @@ def receive_routes(pkt):
 def send_routes():
     while True:
         try:
-            print(f"Router Name: {networkGraph.routerName}")
             if not networkGraph.routerName:
                 raise ValueError("Router name (routerName) is not defined.")
 
@@ -275,7 +274,11 @@ def send_routes():
                     interface=line.interface,
                     weight=line.weight
                 )
-
+	        
+            print("ENVIOU PACOTE BBLP")
+            bblp_pkt.show()
+            print("")
+            print("")
             # Send the packet to all neighbors
             for router, iface in RouterNeighbors.items():
                 dst_ip = NetWork[router]  # Use correct destination IP
@@ -325,7 +328,6 @@ def run_router(initialRouterTable):
         RouterNeighbors[lines.nextRouter] = lines.interface
     global networkGraph
     networkGraph = NetworkGraph(initialRouterTable)
-    networkGraph.PrintGraph()
     start_router()
 
 
