@@ -9,9 +9,19 @@ NetWork = {'RouterA': '10.1.1.0', 'RouterB': '10.2.2.0', "hostA":'10.1.1.0', "ho
 
 Interfaces = {
     ("RouterA", "RouterB"): "r1-eth1", ("RouterB", "RouterA"): "r2-eth1",
-    ("hostA-RouterA"): "h1-eth0", ("RouterA-hostA"): "r1-eth0",
-    ("hostB-RouterB"): "h2-eth0", ("RouterB-hostB"): "r2-eth0"
+    ("hostA","RouterA"): "h1-eth0", ("RouterA","hostA"): "r1-eth0",
+    ("hostB","RouterB"): "h2-eth0", ("RouterB","hostB"): "r2-eth0"
 }  # pode ser setado manualmente pois é unica para toda a rede
+
+InterfacesIP = {
+    "r1-eth1": "10.11.11.1",
+    "r2-eth1": "10.11.11.2",
+    "h1-eth0": "10.1.1.1",
+    "h2-eth0": "10.2.2.1",
+    "r1-eth0": "10.1.1.254",
+    "r2-eth0": "10.2.2.254"
+}
+
 
 RouterNeighbors = {}  # vizinhos desse roteador e interface entre eles
 
@@ -104,27 +114,23 @@ class NetworkGraph:
 
 
 class BBLP_TABLE_LINE(Packet):
-    name = "BBLP_TABLE_LINE"
     fields_desc = [
-        StrFixedLenField("destinationNetwork", "255.255.255.255", length=15),
-        StrFixedLenField("nextRouter", "Router", length=10),
-        StrFixedLenField("interface", "eth0", length=10),
-        IntField("weight", 1)
+        IPField("destinationNetwork", "0.0.0.0"),  # Agora usa IPField
+        StrFixedLenField("nextRouter", "", length=10),
+        StrFixedLenField("interface", "", length=10),
+        IntField("weight", 0)
     ]
-
 
 class BBLP(Packet):
     name = "BBLP"
     fields_desc = [
-        StrFixedLenField("routerName", "Router", length=10),
-        IntField("routeCount", 0)
+        StrFixedLenField("routerName", "Router", length=10),  # Nome do roteador
+        IntField("routeCount", 0),  # Número de rotas
+        #PacketListField("routes", [], BBLP_TABLE_LINE)  # Lista de rotas
     ]
 
-    def __init__(self):
-        Packet.__init__(self)
-        if networkGraph is not None:
-            self.routerName = networkGraph.routerName
-            self.routeCount = 0
+    def SetRouterName(self, name):
+        self.routerName = name
 
     def add_route(self, destinationNetwork, nextRouter, interface, weight):
         route_entry = BBLP_TABLE_LINE(
@@ -136,159 +142,112 @@ class BBLP(Packet):
         self.add_payload(route_entry)
         self.routeCount += 1
 
-    def extract_routes(self):  # retorna RouterTable
-        routerTable = RouterTable(self.routerName.decode('utf-8').strip())
+    def extract_routes(self):  # Retorna RouterTable
+        def normalize_field(field):
+            if isinstance(field, bytes):  # Se for bytes, converte para string
+                return field.decode('utf-8').strip().replace('\x00', '')
+            return field.strip().replace('\x00', '')  # Caso já seja string
+
+        routerTable = RouterTable(normalize_field(self.routerName))
         payload = self.payload
         while isinstance(payload, BBLP_TABLE_LINE):
             routerTable.addRoute(TableLine(
-                payload.destinationNetwork.decode('utf-8').strip(),
-                payload.nextRouter.decode('utf-8').strip(),
-                payload.interface.decode('utf-8').strip(),
-                payload.weight
+                normalize_field(payload.destinationNetwork),
+                normalize_field(payload.nextRouter),
+                normalize_field(payload.interface),
+                payload.weight  # Este campo é um número, não precisa de normalização
             ))
-            payload = payload.payload  # Move to the next layer
-
+            payload = payload.payload  # Move para o próximo elemento
         return routerTable
-    
-BBLP_PROTOCOL_NUMBER = 200
 
 
+
+BBLP_PROTOCOL_NUMBER=200
 bind_layers(IP, BBLP, proto=BBLP_PROTOCOL_NUMBER)
 bind_layers(BBLP, BBLP_TABLE_LINE)
 
-# TODO: quando a topologia estiver correta, criar para cada roteador o networkGraph e corrigir esses métodos de enviar e receber rotas
-# com isso pronto, deve ser possível cada roteador ficar enviando a sua tabela de rotas e receber a dos outros
-# para cada tabela recebida, atualizar o nó do roteador e calcular Dijkstra novamente
-
-
-def parse_raw_to_bblp(raw_packet):
-    """
-    Parse a Raw packet payload into a BBLP packet, including its routing table lines.
-    """
-    try:
-        # Verifique se o pacote tem a camada Raw
-        if not raw_packet.haslayer(Raw):
-            print("Erro: Pacote não contém camada Raw.")
-            return None
-
-        raw_payload = raw_packet[Raw].load  # Pegue os bytes da carga útil
-        print(f"Raw payload: {raw_payload}")
-
-        # Parse o cabeçalho BBLP
-        router_name = raw_payload[:10].decode('utf-8').strip('\x00')
-        route_count = int.from_bytes(raw_payload[10:14], byteorder='big')
-        print(f"Router Name: {router_name}, Route Count: {route_count}")
-
-        # Crie um objeto BBLP
-        bblp_packet = BBLP()
-
-        # Parse cada entrada da tabela de roteamento
-        offset = 14
-        for _ in range(route_count):
-            dest_network = raw_payload[offset:offset+15].decode('utf-8').strip('\x00')
-            next_router = raw_payload[offset+15:offset+25].decode('utf-8').strip('\x00')
-            iface = raw_payload[offset+25:offset+35].decode('utf-8').strip('\x00')
-            weight = int.from_bytes(raw_payload[offset+35:offset+39], byteorder='big')
-
-            # Adicione a entrada à tabela de rotas no pacote BBLP
-            bblp_packet.add_route(dest_network, next_router, iface, weight)
-            offset += 39
-        print("Pacote BBLP reconstruído:")
-        bblp_packet.show()  # Exibe o pacote para debug
-        print("")
-        print("")
-        return bblp_packet
-
-    except Exception as e:
-        print(f"Erro ao processar pacote Raw para BBLP: {e}")
-        return None
-    
-
-
 
 def receive_routes(pkt):
-    if pkt.haslayer(Raw):
-        print("Raw packet received. Attempting to parse into BBLP...")
-        bblp_packet = parse_raw_to_bblp(pkt)
-        if bblp_packet:
-            if bblp_packet.routerName.decode('utf-8').strip()== networkGraph.routerName:
-                print(f"Ignorando pacote enviado pelo próprio roteador: {bblp_packet.routerName.decode('utf-8').strip()}")
-                return
+    if BBLP in pkt:
+        bblp_packet = pkt[BBLP]
+        received_router_name = bblp_packet.routerName.decode('utf-8').strip().replace('\x00', '')
+        local_router_name = networkGraph.routerName.strip().replace('\x00', '')
 
-            networkGraph.UpdateNode(bblp_packet.extract_routes())
-            networkGraph.Dijkstra()
-		
-            # AQUI O SEXO DEFINE SE VOU PULAR A PRIMEIRA LINHA
-            # DO GRAFO OU NAO, A PRIMEIRA APARENTEMENTE SEMPRE DA INVALID GATEWAY
-            # A SEGUNDA NAO, MAS NAO ENTENDO TAMBEM, TA ERRADO O JEITO
-            # Q TA SENDO ESCRITO
-            # SE SEXO FOR MAIOR Q 1 ELE IGNORA A PRIMEIRA
+        if received_router_name==local_router_name:
+            return
+        routerTable=bblp_packet.extract_routes()
+        networkGraph.UpdateNode(routerTable)
+        new_table=networkGraph.Dijkstra()
+        print("//////////////////////////")
+        print("Nova tabela de rota de {networkGraph.routerName}")
+        print(new_table.name)
+        for line in new_table.routeList:
+            print(line.network, line.nextRouter, line.interface, line.weight)
+        print("\\\\\\\\\\\\\\\\\\\\\\\\\\\\")
+        # AQUI O SEXO DEFINE SE VOU PULAR A PRIMEIRA LINHA
+        # DO GRAFO OU NAO, A PRIMEIRA APARENTEMENTE SEMPRE DA INVALID GATEWAY
+        # A SEGUNDA NAO, MAS NAO ENTENDO TAMBEM, TA ERRADO O JEITO
+        # Q TA SENDO ESCRITO
+        # SE SEXO FOR MAIOR Q 1 ELE IGNORA A PRIMEIRA
 
-            sexo = 0
-            # Atualiza as rotas no Mininet com base na tabela de rotas atualizada
-            for line in networkGraph.graph[networkGraph.routerName]:
-                sexo += 1
-                if(sexo>1):
-                        
-                    try:
-                        destination_network = line.network
-                        gateway_ip = NetWork.get(line.nextRouter)  # Gateway é o próximo roteador
-                        interface = line.interface
-                        if not gateway_ip:
-                            print(f"Error: Gateway IP {gateway_ip} for {line.interface} not found in NetWork.")
-                            continue
+        sexo = 0
+        # Atualiza as rotas no Mininet com base na tabela de rotas atualizada
+        for line in networkGraph.graph[networkGraph.routerName]:
+            sexo += 1
+            if(sexo>1):
+                    
+                try:
+                    destination_network = line.network
+                    gateway_ip = NetWork.get(line.nextRouter)  # Gateway é o  próximo roteador
+                    interface = line.interface
+                    if not gateway_ip:
+                        print(f"Error: Gateway IP {gateway_ip} for {line.interface} not found in NetWork.")
+                        continue
 
-                        # Build the command
-                        cmd = [
-                            "ip", "route", "replace",
-                            destination_network,
-                            "via", gateway_ip,
-                            "dev", interface
-                        ]
+                    # Build the command
+                    cmd = [
+                        "ip", "route", "replace",
+                        destination_network,
+                        "via", gateway_ip,
+                        "dev", interface
+                    ]
 
-                        # Execute the command
-                        subprocess.run(cmd, check=True)
-                        print(f"Route to {destination_network} via {gateway_ip} on {interface} updated successfully.")
+                    # Execute the command
+                    subprocess.run(cmd, check=True)
+                    print(f"Route to {destination_network} via {gateway_ip} on {interface} updated successfully.")
 
-                    except Exception as e:
-                        print(f"Error updating route for {line.network}: {e}")  
-        else:
-            print("Failed to parse Raw packet into BBLP.")
-    else:
-        print("Received an unrelated packet.")
+                except Exception as e:
+                    print(f"Error updating route for {line.network}: {e}")
 
 
 
 def send_routes():
     while True:
-        try:
-            if not networkGraph.routerName:
-                raise ValueError("Router name (routerName) is not defined.")
+        #try:
+        # Create the BBLP packet
+        bblp_pkt = BBLP()
+        bblp_pkt.SetRouterName(networkGraph.routerName)
+        for line in networkGraph.graph[networkGraph.routerName]:
+            bblp_pkt.add_route(
+                destinationNetwork=line.network,
+                nextRouter=line.nextRouter,
+                interface=line.interface,
+                weight=line.weight
+            )
+        # Send the packet to all neighbors
+        for router, iface in RouterNeighbors.items():
+            print("??????????????????????")
+            print((router,networkGraph.routerName), Interfaces[(router,networkGraph.routerName)], InterfacesIP[Interfaces[(router,networkGraph.routerName)]] )
+            dst_ip = InterfacesIP[Interfaces[(router,networkGraph.routerName)]]  #interface de destino, exemplo enviar r1->r2  entao interface de destino e a interface que liga r2 a r1
+            ip_packet = IP(dst=dst_ip, proto=BBLP_PROTOCOL_NUMBER) / bblp_pkt
+            send(ip_packet)
+            print(f"Route table sent to {dst_ip} via {iface}")
+            print("!!!!!!!!!!!!!!!!!!!!!!!")
 
-            # Create the BBLP packet
-            bblp_pkt = BBLP()
-            for line in networkGraph.graph[networkGraph.routerName]:
-                bblp_pkt.add_route(
-                    destinationNetwork=line.network,
-                    nextRouter=line.nextRouter,
-                    interface=line.interface,
-                    weight=line.weight
-                )
-	        
-            print("ENVIOU PACOTE BBLP")
-            bblp_pkt.show()
-            print("")
-            print("")
-            # Send the packet to all neighbors
-            for router, iface in RouterNeighbors.items():
-                dst_ip = NetWork[router]  # Use correct destination IP
-                ip_packet = IP(dst=dst_ip, proto=BBLP_PROTOCOL_NUMBER) / bblp_pkt
-                send(ip_packet, iface=iface)
-                print(f"Route table sent to {dst_ip} via {iface}")
 
-        except Exception as e:
-            print(f"Error in send_routes: {e}")
-        time.sleep(15)
+        #except Exception as e:
+            #print(f"Error in send_routes: {e}")
+        time.sleep(5)
 
 
 
@@ -309,8 +268,7 @@ def start_router():
                 kwargs={
                     'prn': receive_routes,
                     'iface': iface,
-                    'store': 0,
-                    'filter': f"ip proto {BBLP_PROTOCOL_NUMBER}"
+                    'filter': f"ip"
                 },
                 daemon=True
             ).start()
@@ -340,6 +298,7 @@ if __name__ == "__main__":
         sys.exit(1)
 
     routerName = sys.argv[1]
+
     initialRouterTable = RouterTable(routerName)
     for tableLine in globalRouteTable[routerName]:
         initialRouterTable.addRoute(tableLine=tableLine)
