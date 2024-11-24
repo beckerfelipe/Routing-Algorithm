@@ -184,40 +184,41 @@ def receive_routes(pkt):
         for line in new_table.routeList:
             print(line.network, line.nextRouter, line.interface, line.weight)
         print("\\\\\\\\\\\\\\\\\\\\\\\\\\\\")
-        # AQUI O SEXO DEFINE SE VOU PULAR A PRIMEIRA LINHA
-        # DO GRAFO OU NAO, A PRIMEIRA APARENTEMENTE SEMPRE DA INVALID GATEWAY
-        # A SEGUNDA NAO, MAS NAO ENTENDO TAMBEM, TA ERRADO O JEITO
-        # Q TA SENDO ESCRITO
-        # SE SEXO FOR MAIOR Q 1 ELE IGNORA A PRIMEIRA
-
-        sexo = 0
+        
         # Atualiza as rotas no Mininet com base na tabela de rotas atualizada
         for line in networkGraph.graph[networkGraph.routerName]:
-            sexo += 1
-            if(sexo>1):
-                    
-                try:
-                    destination_network = line.network
-                    gateway_ip = NetWork.get(line.nextRouter)  # Gateway é o  próximo roteador
-                    interface = line.interface
-                    if not gateway_ip:
-                        print(f"Error: Gateway IP {gateway_ip} for {line.interface} not found in NetWork.")
-                        continue
+            try:
+                destination_network = line.network
+                next_router = line.nextRouter
 
-                    # Build the command
-                    cmd = [
-                        "ip", "route", "replace",
-                        destination_network,
-                        "via", gateway_ip,
-                        "dev", interface
-                    ]
+                # Determine the correct gateway IP
+                interface_pair = (networkGraph.routerName, next_router)
+                interface_name = Interfaces.get(interface_pair)
 
-                    # Execute the command
-                    subprocess.run(cmd, check=True)
-                    print(f"Route to {destination_network} via {gateway_ip} on {interface} updated successfully.")
+                if not interface_name:
+                    print(f"Error: Interface between {networkGraph.routerName} and {next_router} not found.")
+                    continue
 
-                except Exception as e:
-                    print(f"Error updating route for {line.network}: {e}")
+                gateway_ip = InterfacesIP.get(interface_name)
+
+                if not gateway_ip:
+                    print(f"Error: Gateway IP for interface {interface_name} not found in InterfacesIP.")
+                    continue
+
+                # Build the command
+                cmd = [
+                    "ip", "route", "replace",
+                    destination_network,
+                    "via", gateway_ip,
+                    "dev", interface_name
+                ]
+
+                # Execute the command
+                subprocess.run(cmd, check=True)
+                print(f"Route to {destination_network} via {gateway_ip} on {interface_name} updated successfully.")
+
+            except Exception as e:
+                print(f"Error updating route for {line.network}: {e}")
 
 
 
