@@ -5,17 +5,20 @@ import threading
 import subprocess
 import ipaddress
 
-NetWork = {'RouterA': '10.1.1.0', 'RouterB': '10.2.2.0', "hostA":'10.1.1.0', "hostB":"10.2.2.0"}  # pode ser setado manualmente é igual para todos os roteadores
+NetWork = {'RouterA': '10.1.1.0', 'RouterB': '10.2.2.0', "hostA":'10.1.1.0', "hostB":"10.2.2.0", "RouterC":"10.13.13.0"}  # pode ser setado manualmente é igual para todos os roteadores
 
 Interfaces = {
-    ("RouterA", "RouterB"): "r1-eth1", ("RouterB", "RouterA"): "r2-eth1",
+    ("RouterA", "RouterC"): "r1-eth2", ("RouterC", "RouterA"): "r3-eth1",
+    ("RouterB", "RouterC"): "r2-eth2", ("RouterC", "RouterB"): "r3-eth2",
     ("hostA","RouterA"): "h1-eth0", ("RouterA","hostA"): "r1-eth0",
     ("hostB","RouterB"): "h2-eth0", ("RouterB","hostB"): "r2-eth0"
 }  # pode ser setado manualmente pois é unica para toda a rede
 
 InterfacesIP = {
-    "r1-eth1": "10.11.11.1",
-    "r2-eth1": "10.11.11.2",
+    "r1-eth2": "10.12.12.1",
+    "r3-eth1": "10.12.12.254",
+    "r2-eth2": "10.13.13.1",
+    "r3-eth2": "10.13.13.254",
     "h1-eth0": "10.1.1.1",
     "h2-eth0": "10.2.2.1",
     "r1-eth0": "10.1.1.254",
@@ -37,8 +40,9 @@ class TableLine:
 
 
 globalRouteTable = {
-    "RouterA": [TableLine("10.2.2.0", "r1-eth1", "RouterB", 2), TableLine('10.1.1.0', 'r1-eth0', "hostA",3)],
-    "RouterB": [TableLine("10.1.1.0", "r2-eth1", "RouterA", 5), TableLine('10.2.2.0', 'r2-eth0', "hostB",3)]
+    "RouterA": [TableLine("10.13.13.0", "r1-eth2", "RouterC", 1), TableLine('10.1.1.0', 'r1-eth0', "hostA",1)],
+    "RouterB": [TableLine("10.1.1.0", "r2-eth2", "RouterC", 5), TableLine('10.2.2.0', 'r2-eth0', "hostB",5)],
+    "RouterC": [TableLine("10.1.1.0", "r3-eth1", "RouterA", 7), TableLine('10.2.2.0', 'r3-eth2', "RouterB",7)]
 }  # para cada roteador seus vizinhos
 
 class RouterTable:
@@ -126,7 +130,6 @@ class BBLP(Packet):
     fields_desc = [
         StrFixedLenField("routerName", "Router", length=10),  # Nome do roteador
         IntField("routeCount", 0),  # Número de rotas
-        #PacketListField("routes", [], BBLP_TABLE_LINE)  # Lista de rotas
     ]
 
     def SetRouterName(self, name):
@@ -142,24 +145,73 @@ class BBLP(Packet):
         self.add_payload(route_entry)
         self.routeCount += 1
 
-    def extract_routes(self):  # Retorna RouterTable
-        def normalize_field(field):
-            if isinstance(field, bytes):  # Se for bytes, converte para string
+    @staticmethod
+    def decode_raw_to_routes(raw_data):
+        router_table_lines = []
+        entry_size = 28  # Tamanho de cada entrada no campo Raw (4 + 10 + 10 + 4)
+        
+        def clean_field(field):
+            """
+            Decodifica bytes para string UTF-8, remove null bytes e espaços extras.
+            """
+            if isinstance(field, bytes):
                 return field.decode('utf-8').strip().replace('\x00', '')
-            return field.strip().replace('\x00', '')  # Caso já seja string
+            return field.strip().replace('\x00', '')
+        
+        while len(raw_data) >= entry_size:
+            # Extraindo os campos
+            destination_network = str(ipaddress.IPv4Address(raw_data[:4]))
+            next_router = clean_field(raw_data[4:14])
+            interface = clean_field(raw_data[14:24])
+            weight = int.from_bytes(raw_data[24:28], byteorder='big')
+            
+            # Criando uma linha de tabela de roteamento
+            router_table_lines.append(
+                TableLine(
+                    network=destination_network,
+                    interface=interface,
+                    nextRouter=next_router,
+                    weight=weight
+                )
+            )
+            
+            # Avançando para a próxima entrada
+            raw_data = raw_data[entry_size:]
+        
+        return router_table_lines
 
-        routerTable = RouterTable(normalize_field(self.routerName))
+    def extract_routes(self):
+        def clean_field(field):
+            """
+            Decodifica bytes para string UTF-8, remove null bytes e espaços extras.
+            """
+            if isinstance(field, bytes):
+                return field.decode('utf-8').strip().replace('\x00', '')
+            return field.strip().replace('\x00', '')
+
+        router_name = clean_field(self.routerName)
+        router_table = RouterTable(router_name)
+        
+        # Processa a primeira linha da tabela, já interpretada corretamente
         payload = self.payload
         while isinstance(payload, BBLP_TABLE_LINE):
-            routerTable.addRoute(TableLine(
-                normalize_field(payload.destinationNetwork),
-                normalize_field(payload.nextRouter),
-                normalize_field(payload.interface),
-                payload.weight  # Este campo é um número, não precisa de normalização
-            ))
-            payload = payload.payload  # Move para o próximo elemento
-        return routerTable
-
+            router_table.addRoute(
+                TableLine(
+                    network=clean_field(payload.destinationNetwork),
+                    interface=clean_field(payload.interface),
+                    nextRouter=clean_field(payload.nextRouter),
+                    weight=payload.weight
+                )
+            )
+            payload = payload.payload  # Move para o próximo item
+        
+        # Processa as rotas no campo Raw
+        if isinstance(payload, Raw):
+            raw_routes = BBLP.decode_raw_to_routes(payload.load)
+            for route in raw_routes:
+                router_table.addRoute(route)
+        
+        return router_table
 
 
 BBLP_PROTOCOL_NUMBER=200
@@ -175,11 +227,18 @@ def receive_routes(pkt):
 
         if received_router_name==local_router_name:
             return
+        bblp_packet.show()
         routerTable=bblp_packet.extract_routes()
+        print("RECEBEU PACOTE DO ROTEADOR" ,routerTable.name)
+        for line in routerTable.routeList:
+            print(f"Rede de destino: {line.network}")
+            print(f"Próximo roteador: {line.nextRouter}")
+            print(f"Interface: {line.interface}")
+            print(f"Peso: {line.weight}")
+            print("-" * 40)
         networkGraph.UpdateNode(routerTable)
         new_table=networkGraph.Dijkstra()
         print("//////////////////////////")
-        print("Nova tabela de rota de {networkGraph.routerName}")
         print(new_table.name)
         for line in new_table.routeList:
             print(line.network, line.nextRouter, line.interface, line.weight)
@@ -226,6 +285,10 @@ def send_routes():
     while True:
         #try:
         # Create the BBLP packet
+        print("GRAFO ATUAL")
+        print("="*40)
+        networkGraph.PrintGraph()
+        print("0"*40)
         bblp_pkt = BBLP()
         bblp_pkt.SetRouterName(networkGraph.routerName)
         for line in networkGraph.graph[networkGraph.routerName]:
