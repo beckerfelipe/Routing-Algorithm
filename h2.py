@@ -1,20 +1,34 @@
-from brainword import *
-from scapy import *
+import threading
+import time
+import random
+from scapy.all import IP, TCP, Raw, send
 
-def create_packet(message):
-    packet = IP(dst="10.2.2.254/24") / TCP(dport=80) / Raw(load=message)
+# Mensagens a serem enviadas
+messages = [
+    "C0nh3c4 os beneficio$ do M3wing",
+    "Beneficios do aprendizado continuo",
+    "A rede esta funcionando corretamente",
+    "M3wing! Mensagem do servidor",
+]
+
+# Criação de um pacote TCP com mensagem aleatória
+def create_packet():
+    message = random.choice(messages)
+    packet = IP(dst="10.1.1.254") / TCP(dport=80) / Raw(load=message)
     return packet
 
-p1 = create_packet("C0nh3c4 os beneficio$ do M3wing")
-send(p1)
+# Envia pacotes continuamente
+def send_packet():
+    while True:
+        packet = create_packet()
+        print(f"h2 ENVIOU PACOTE: {packet[Raw].load.decode()}")
+        send(packet)
+        time.sleep(1)  # Pausa de 1 segundo entre os envios
 
-# ⠀⠀⠀⠀ ⠀ ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣀⣀⣠⣤⣤⣀⠀⠀ ⠀
-# ⠀⠀  ⠀ ⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣠⣤⣶⣾⣿⣿⣿⣿⣿⣿⣿⣿⣧⠀
-#   ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣤⣾⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿
-# ⠀ ⠀⠀⠀⠀⠀⠀⠀⢀⣴⣾⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿
-# ⠀ ⠀⠀⠀⠀⢀⣀⢾⣿⣿⣿⣿⣿⣿⣿⣿⣿⠿⠛⢋⣭⡍⣿⣿⣿⣿⣿⣿
-# ⠀ ⠀⢀⣴⣶⣶⣝⢷⡝⢿⣿⣿⣿⠿⠛⠉⠀⠀⣰⣿⣿⢣⣿⣿⣿⣿⣿⣿⡇
-# ⢀⣾⣿⣿⣿⣿⣧⠻⡌⠿⠋⠁⠀⠀⠀⠀⢰⣿⣿⡏⣸⣿⣿⣿⣿⣿⣿⣿
-# ⣼⣿⣿⣿⣿⣿⣿⡇⠁⠀⠀⠀⠀⠀⠀⠀⠈⠻⢿⠇⢻⣿⣿⣿⣿⣿⣿⡟ 
-# ⠙⢹⣿⣿⣿⠿⠋⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⠻⢿⣿⣿⡿⠟⠁ ⠀⠀
-#    ⠉⠁⠀⠀⠀⠀⠀⠀
+if __name__ == "__main__":
+    # Executa o envio de pacotes em uma thread separada
+    threading.Thread(target=send_packet, daemon=True).start()
+
+    # Mantém o programa em execução
+    while True:
+        time.sleep(1)

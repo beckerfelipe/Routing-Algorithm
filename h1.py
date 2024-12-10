@@ -1,14 +1,18 @@
-from scapy.all import sniff, TCP
+from scapy.all import *
 
-def process_packet(packet):
-    if packet.haslayer(TCP):
-        tcp_layer = packet[TCP]
-        print(f"\n[+] Pacote TCP capturado:")
-        print(f"  Porta de origem: {tcp_layer.sport}")
-        print(f"  Porta de destino: {tcp_layer.dport}")
-        print(f"  Flags: {tcp_layer.flags}")
-        if tcp_layer.payload:
-            print(f"  Payload: {bytes(tcp_layer.payload)}")
+def receive_packets(packet):
+    if packet.haslayer(IP):
+        if packet.haslayer(Raw):
+            print(f"Pacote recebido de {packet[IP].src} para {packet[IP].dst}")
+            print(f"Payload: {packet[Raw].load.decode(errors='ignore')}")
 
-print("Sniffando pacotes TCP...")
-sniff(filter="tcp", prn=process_packet, count=10)
+def start_receiver(iface):
+    try:
+        print(f"Iniciando o sniffing na interface {iface} para receber pacotes...")
+        sniff(prn=receive_packets, iface=iface, filter="ip", store=False)
+    except Exception as e:
+        print(f"Erro ao iniciar o sniffing: {e}")
+
+if __name__ == "__main__":
+    iface = 'h1-eth0'
+    start_receiver(iface)

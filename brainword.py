@@ -1,8 +1,14 @@
 from scapy.all import *
+from brainword import *
+import chardet
+
+def detect_encoding(data):
+    """Detecta a codificação do texto."""
+    result = chardet.detect(data)
+    return result['encoding']
 
 
 def packet_filtering(packet):
-
     print("ANTES DO FILTRO")
     packet.show()
 
@@ -11,20 +17,25 @@ def packet_filtering(packet):
 
     print("DEPOIS DO FILTRO")
     packet.show()
-    
-    # Envia para prox roteador
-    
-def filter_brainrot_content(packet):
-    '''Retorna o novo payload com as palavras proibidas substutuídas por: -'''
 
-    payload = packet[Raw].load.decode(errors='ignore')
+    send(packet)
+
+def filter_brainrot_content(packet):
+    '''Returns the new payload with forbidden words replaced by dashes'''
+
+    raw_data = packet[Raw].load
+
+    # Detecta a codificação do payload
+    encoding = detect_encoding(raw_data)
+
+    payload = raw_data.decode(encoding, errors="ignore")  
     words = payload.split()
 
     forbiddenWords = ['mewing', 'bonesmashing']
 
     for i in range(len(words)):
         if isWordForbidden(words[i], forbiddenWords):
-            words[i] = '-'
+            words[i] = '-' 
 
     return " ".join(words)
 
